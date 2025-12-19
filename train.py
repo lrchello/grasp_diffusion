@@ -60,7 +60,7 @@ def main(cfg):
 
     network = create_network(cfg.model, mode='train')
     model = TrainingModule(
-        cfg=cfg.training,
+        cfg=cfg,
         network=network,
         epoch_idx=last_epoch
     )

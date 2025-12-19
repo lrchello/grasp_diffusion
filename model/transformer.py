@@ -1,10 +1,4 @@
-"""
-The code is sourced from https://github.com/r-pad/taxpose, which builds upon
-the transformer model from https://github.com/WangYueFt/dcp/blob/master/model.py.
-
-The only modification made is adjusting the relative imports to enhance the clarity of the file structure.
-"""
-
+# transformer.py  -- 修正版（修复 LayerNorm 缩进、加入 dropout、保持接口向后兼容）
 import math
 import copy
 import torch
@@ -30,8 +24,9 @@ class Transformer(nn.Module):
         self.n_heads = n_heads
         self.bidirectional = bidirectional
         c = copy.deepcopy
-        attn = MultiHeadedAttention(self.n_heads, self.emb_dim)
+        attn = MultiHeadedAttention(self.n_heads, self.emb_dim, dropout=dropout)
         ff = PositionwiseFeedForward(self.emb_dim, self.ff_dims, self.dropout)
+        # src_embed/tgt_embed/generator left as identity (nn.Sequential()) for compatibility
         self.model = EncoderDecoder(
             Encoder(
                 EncoderLayer(self.emb_dim, c(attn), c(ff), self.dropout),
@@ -41,43 +36,76 @@ class Transformer(nn.Module):
                 DecoderLayer(self.emb_dim, c(attn), c(attn), c(ff), self.dropout),
                 self.N,
             ),
-            nn.Sequential(),
-            nn.Sequential(),
-            nn.Sequential(),
+            nn.Sequential(),  # src_embed (identity)
+            nn.Sequential(),  # tgt_embed (identity)
+            nn.Sequential(),  # generator (identity)
         )
 
     def forward(self, *input):
+        """
+        input[0] = src (e.g. robot embedding)
+        input[1] = tgt (e.g. object embedding)
+        returns dict with:
+            - src_embedding: decoder output when decoding tgt conditioned on src (same dim as input)
+            - src_attn: last layer src-attention weights (if available)
+            - encoder_out: encoder output (after encoder norm) -- helpful as conditioning vector
+        """
         src = input[0]
         tgt = input[1]
-        src_embedding = self.model(tgt, src, None, None)
-        src_attn = self.model.decoder.layers[-1].src_attn.attn
 
-        outputs = {"src_embedding": src_embedding, "src_attn": src_attn}
+        # model returns decode(encode(src), tgt)
+        src_embedding = self.model(tgt, src, None, None)
+
+        # try to extract the src_attn from last decoder layer if present
+        src_attn = None
+        try:
+            src_attn = self.model.decoder.layers[-1].src_attn.attn
+        except Exception:
+            src_attn = None
+
+        # encoder_out: run encoder directly for optional conditioning use
+        # Note: encoder expects (x, mask)
+        encoder_out = self.model.encoder(self.model.src_embed(src), None)
+
+        outputs = {
+            "src_embedding": src_embedding,
+            "src_attn": src_attn,
+            "encoder_out": encoder_out,
+        }
 
         if self.bidirectional:
-            tgt_embedding = (
-                self.model(src, tgt, None, None)
-            )
-            tgt_attn = self.model.decoder.layers[-1].src_attn.attn
-
-            outputs = {
-                **outputs,
+            tgt_embedding = self.model(src, tgt, None, None)
+            tgt_attn = None
+            try:
+                tgt_attn = self.model.decoder.layers[-1].src_attn.attn
+            except Exception:
+                tgt_attn = None
+            outputs.update({
                 "tgt_embedding": tgt_embedding,
                 "tgt_attn": tgt_attn,
-            }
+            })
 
         return outputs
+
 
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
-def attention(query, key, value, mask=None, dropout=None):
+
+def attention(query, key, value, mask=None, dropout_layer: nn.Module = None):
+    """
+    query, key, value: shape (batch, heads, seq_len, d_k)
+    returns: (output, attn_weights)
+    """
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1).contiguous()) / math.sqrt(d_k)
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
     p_attn = F.softmax(scores, dim=-1)
+    if dropout_layer is not None:
+        p_attn = dropout_layer(p_attn)
     return torch.matmul(p_attn, value), p_attn
+
 
 class LayerNorm(nn.Module):
     def __init__(self, features, eps=1e-6):
@@ -91,12 +119,11 @@ class LayerNorm(nn.Module):
         std = x.std(-1, keepdim=True)
         return self.a_2 * (x - mean) / (std + self.eps) + self.b_2
 
+
 class EncoderDecoder(nn.Module):
     """
-    A standard Encoder-Decoder architecture. Base for this and many
-    other models.
+    A standard Encoder-Decoder architecture. Base for this and many other models.
     """
-
     def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
@@ -107,8 +134,7 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         """Take in and process masked src and target sequences."""
-        return self.decode(self.encode(src, src_mask), src_mask,
-                           tgt, tgt_mask)
+        return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
@@ -116,9 +142,9 @@ class EncoderDecoder(nn.Module):
     def decode(self, memory, src_mask, tgt, tgt_mask):
         return self.generator(self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask))
 
+
 class Decoder(nn.Module):
     """Generic N layer decoder with masking."""
-
     def __init__(self, layer, N):
         super(Decoder, self).__init__()
         self.layers = clones(layer, N)
@@ -129,9 +155,9 @@ class Decoder(nn.Module):
             x = layer(x, memory, src_mask, tgt_mask)
         return self.norm(x)
 
+
 class DecoderLayer(nn.Module):
     """Decoder is made of self-attn, src-attn, and feed forward (defined below)"""
-
     def __init__(self, size, self_attn, src_attn, feed_forward, dropout):
         super(DecoderLayer, self).__init__()
         self.size = size
@@ -147,13 +173,16 @@ class DecoderLayer(nn.Module):
         x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
         return self.sublayer[2](x, self.feed_forward)
 
+
 class SublayerConnection(nn.Module):
     def __init__(self, size, dropout=None):
         super(SublayerConnection, self).__init__()
         self.norm = LayerNorm(size)
+        self.dropout = nn.Dropout(dropout) if dropout is not None else nn.Identity()
 
     def forward(self, x, sublayer):
-        return x + sublayer(self.norm(x))
+        return x + self.dropout(sublayer(self.norm(x)))
+
 
 class Encoder(nn.Module):
     def __init__(self, layer, N):
@@ -165,6 +194,7 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x, mask)
         return self.norm(x)
+
 
 class EncoderLayer(nn.Module):
     def __init__(self, size, self_attn, feed_forward, dropout):
@@ -178,6 +208,7 @@ class EncoderLayer(nn.Module):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
         return self.sublayer[1](x, self.feed_forward)
 
+
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1):
         """Take in model size and number of heads."""
@@ -186,9 +217,10 @@ class MultiHeadedAttention(nn.Module):
         # We assume d_v always equals d_k
         self.d_k = d_model // h
         self.h = h
+        # 4 linear layers: query, key, value, final projection
         self.linears = clones(nn.Linear(d_model, d_model), 4)
         self.attn = None
-        self.dropout = None
+        self.dropout = nn.Dropout(dropout) if dropout is not None else nn.Identity()
 
     def forward(self, query, key, value, mask=None):
         """Implements Figure 2"""
@@ -198,29 +230,33 @@ class MultiHeadedAttention(nn.Module):
         nbatches = query.size(0)
 
         # 1) Do all the linear projections in batch from d_model => h x d_k
-        query, key, value = \
-            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2).contiguous()
-             for l, x in zip(self.linears, (query, key, value))]
+        query, key, value = [
+            l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2).contiguous()
+            for l, x in zip(self.linears, (query, key, value))
+        ]
 
         # 2) Apply attention on all the projected vectors in batch.
-        x, self.attn = attention(query, key, value, mask=mask,
-                                 dropout=self.dropout)
+        x, self.attn = attention(query, key, value, mask=mask, dropout_layer=self.dropout)
 
         # 3) "Concat" using a view and apply a final linear.
-        x = x.transpose(1, 2).contiguous() \
-            .view(nbatches, -1, self.h * self.d_k)
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
 
 
 class PositionwiseFeedForward(nn.Module):
     """Implements FFN equation."""
-
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
         self.w_1 = nn.Linear(d_model, d_ff)
-        self.norm = nn.Sequential()  # nn.BatchNorm1d(d_ff)
+        # keep norm as identity by default; if you want BatchNorm use explicit module
+        self.norm = nn.Sequential()
         self.w_2 = nn.Linear(d_ff, d_model)
-        self.dropout = None
+        self.dropout = nn.Dropout(dropout) if dropout is not None else nn.Identity()
 
     def forward(self, x):
-        return self.w_2(self.norm(F.relu(self.w_1(x)).transpose(2, 1).contiguous()).transpose(2, 1).contiguous())
+        # x shape: (B, seq_len, d_model)
+        x = self.w_1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.w_2(x)
+        return x

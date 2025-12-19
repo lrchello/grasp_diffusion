@@ -1,26 +1,27 @@
 defaults:
-    - model.yaml
-    - dataset: cmap_dataset.yaml
-    - _self_
+  - model.yaml
+  - dataset: cmap_dataset.yaml
+  - _self_
 
-model:  # override model.yaml
-    encoder:
-        pretrain: null
+model:
+  pretrain: null
+  use_diffusion: true
+  diffusion_timesteps: 100
 
-dataset:  # override cmap_dataset.yaml
-    batch_size: 100  # total grasps of (robot, object) combination
+dataset:
+  batch_size: 20
 
-split_batch_size: 25  # limited by GPU memory
+split_batch_size: 5
 gpu: 0
-name: '3robots'
+
+name: 'model_3robots_diffusion'
+
 validate_epochs:
-    - 10
-    - 20
-    - 30
-    - 40
-#    - 50
-#    - 60
-#    - 70
-#    - 80
-#    - 90
-#    - 100
+  - 150
+  - 175
+  - 200
+use_decoder_ik: false
+decoder_K: 256
+
+validate:
+  sample_K: 7

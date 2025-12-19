@@ -4,38 +4,33 @@ defaults:
   - dataset: cmap_dataset.yaml
   - _self_
 
-name: 'model_3robots'
+name: 'model_3robots_diffusion'
 
 seed: 42
 gpu:
   - 0
-  - 1
-  - 2
-  - 3
-  - 4
-  - 5
-  - 6
-  - 7
-
-load_from_checkpoint: False
 log_every_n_steps: 5
+load_from_checkpoint: False
 
 training:
   max_epochs: 200
-
   save_dir: '${output_dir}/state_dict'
   save_every_n_epoch: 5
 
   lr: 1e-4
 
-  loss_kl: True
-  loss_kl_weight: 0.01
+  # ===== Loss settings =====
+  dro_weight: 1.0
+  rec_weight: 1.0
+  diffusion_weight: 1.0
 
-  loss_r: True
-  loss_r_weight: 1
+  kl_weight: 0.01
+  diffusion_kl_weight: 0.01
 
-  loss_se3: True
-  loss_se3_weight: 0.01
+  loss_se3: false
+  loss_depth: false
 
-  loss_depth: True
-  loss_depth_weight: 1
+model:
+  use_diffusion: true
+  diffusion_timesteps: 100
+

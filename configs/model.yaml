@@ -1,8 +1,24 @@
 model:
+  # diffusion
+  use_diffusion: true
+  diffusion_timesteps: 500
+
+  # embedding / latent sizes
   emb_dim: 512
   latent_dim: 64
 
+  # pretrain embedding checkpoint (for encoder). set null if training from scratch
   pretrain: pretrain_3robots.pth
 
-  center_pc: True
-  block_computing: True
+  # point cloud processing
+  center_pc: true
+  block_computing: true
+  block_num: 4   # ensure N (points) is divisible by block_num or change logic
+
+  # decoder settings
+  decoder_type: strong    # choices: folding / strong / pointtransformer
+  K: 256                 # decoder output point count
+  decoder_hidden_dim: 256
+  decoder_folding_layers: 2
+  decoder_attn_layers: 2
+  decoder_heads: 4

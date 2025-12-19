@@ -1,12 +1,46 @@
+# ========================
+# Python / IDE
+# ========================
+__pycache__/
 **/__pycache__/
+*.pyc
 .idea/
-logs/
-lightning_logs/
+
+# ========================
+# Virtual environment
+# ========================
+.venv/
+venv/
+env/
+
+# ========================
+# Model weights / checkpoints
+# ========================
+*.pt
+*.pth
+*.ckpt
 
 ckpt/
-data/
 output/
 outputs/
+logs/
+lightning_logs/
 tmp/
 validate_output/
 vis_info/
+
+# ========================
+# Data
+# ========================
+data/
+
+# ========================
+# Weights & Biases
+# ========================
+wandb/
+**/wandb/
+
+# ========================
+# OS
+# ========================
+.DS_Store
